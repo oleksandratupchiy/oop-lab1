@@ -11,57 +11,43 @@ namespace SpreadsheetApp11.Expressions
         private readonly HashSet<(int r, int c)> _stack = new();
 
         public Evaluator(System.Func<Sheet> sheetAccessor) { _sheetAccessor = sheetAccessor; }
+
         public double EvalCell(int r, int c)
         {
+            var sheet = _sheetAccessor();
+            if (sheet == null)
+                throw new EvalException("Sheet is null");
+
+            var cell = sheet.GetCell(r, c);
+            if (cell == null)
+                throw new EvalException("Cell is null");
+
+            if (cell.Parsed == null && string.IsNullOrEmpty(cell.RawText))
+            {
+                return 0;
+            }
+
+            if (cell.HasCachedValue)
+                return cell.CachedValue;
+
+            if (!_stack.Add((r, c)))
+                throw new EvalException("Cycle detected");
+
             try
             {
-                var sheet = _sheetAccessor();
-                if (sheet == null)
-                    throw new EvalException("Sheet is null");
+                double val = EvalExpr(cell.Parsed);
 
-                var cell = sheet.GetCell(r, c);
-                if (cell == null)
-                    throw new EvalException("Cell is null");
-
-                if (cell.Parsed == null && string.IsNullOrEmpty(cell.RawText))
+                if (cell.Parsed != null || !string.IsNullOrEmpty(cell.RawText))
                 {
-                    return 0;
+                    cell.CachedValue = val;
+                    cell.HasCachedValue = true;
                 }
 
-                if (cell.HasCachedValue)
-                    return cell.CachedValue;
-
-                if (!_stack.Add((r, c)))
-                    throw new EvalException("Cycle detected");
-
-                try
-                {
-                    double val = EvalExpr(cell.Parsed);
-
-                    if (cell.Parsed != null || !string.IsNullOrEmpty(cell.RawText))
-                    {
-                        cell.CachedValue = val;
-                        cell.HasCachedValue = true;
-                    }
-
-                    return val;
-                }
-                finally
-                {
-                    _stack.Remove((r, c));
-                }
+                return val;
             }
-            catch (EvalException ex)
+            finally
             {
-                if (ex.Message.Contains("Cycle"))
-                {
-                    throw;
-                }
-                return 0;
-            }
-            catch (Exception ex)
-            {
-                return 0;
+                _stack.Remove((r, c));
             }
         }
 
@@ -92,7 +78,9 @@ namespace SpreadsheetApp11.Expressions
                 '-' => left - right,
                 '*' => left * right,
                 '/' => right == 0 ? throw new EvalException("Division by zero") : left / right,
-                '^' => Math.Pow(left, right),
+                '^' => (left == 0 && right == 0)
+                        ? throw new EvalException("Zero power zero is undefined")
+                        : Math.Pow(left, right),
                 _ => throw new EvalException($"Unknown operator: {binary.Op}")
             };
         }
