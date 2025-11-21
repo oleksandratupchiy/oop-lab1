@@ -25,6 +25,9 @@ namespace SpreadsheetApp11.UI
 
         private Core.DisplayMode _mode = Core.DisplayMode.Values;
 
+        // Поле для відстеження змін
+        private bool _isModified = false;
+
         private const int InitialRows = 20;
         private const int InitialCols = 10;
 
@@ -72,6 +75,46 @@ namespace SpreadsheetApp11.UI
             _btnSaveDrive.Click += (s, e) => SaveToDrive();
             _btnOpenDrive.Click += (s, e) => LoadFromDrive();
             _btnHelp.Click += (s, e) => ShowHelpInfo();
+
+            this.FormClosing += MainForm_FormClosing;
+        }
+
+        private void SetModified(bool modified)
+        {
+            _isModified = modified;
+            string title = "Електронні таблиці Lab 11";
+            Text = modified ? $"{title} *" : title;
+        }
+
+        private bool PromptSaveIfModified()
+        {
+            if (!_isModified) return true;
+
+            var result = MessageBox.Show(
+                "У вас є незбережені зміни. Бажаєте зберегти їх перед продовженням?",
+                "Незбережені зміни",
+                MessageBoxButtons.YesNoCancel,
+                MessageBoxIcon.Warning);
+
+            if (result == DialogResult.Cancel)
+            {
+                return false;
+            }
+
+            if (result == DialogResult.Yes)
+            {
+                return SaveFile();
+            }
+
+            return true;
+        }
+
+        private void MainForm_FormClosing(object sender, FormClosingEventArgs e)
+        {
+            if (!PromptSaveIfModified())
+            {
+                e.Cancel = true;
+            }
         }
 
         private void BuildGrid()
@@ -126,6 +169,7 @@ namespace SpreadsheetApp11.UI
             }
             else
             {
+                SetModified(true);
                 RefreshGrid();
             }
         }
@@ -184,10 +228,10 @@ namespace SpreadsheetApp11.UI
         }
 
         private void InsertRowAtSelection()
-
         {
             int rowIndex = _grid.CurrentCell?.RowIndex ?? _service.RowCount;
             _service.InsertRows(rowIndex, 1);
+            SetModified(true);
             BuildGrid();
         }
 
@@ -197,6 +241,7 @@ namespace SpreadsheetApp11.UI
             if (rowIndex >= 0 && rowIndex < _service.RowCount)
             {
                 _service.DeleteRows(rowIndex, 1);
+                SetModified(true);
                 BuildGrid();
             }
         }
@@ -205,6 +250,7 @@ namespace SpreadsheetApp11.UI
         {
             int colIndex = _grid.CurrentCell?.ColumnIndex ?? _service.ColCount;
             _service.InsertColumns(colIndex, 1);
+            SetModified(true);
             BuildGrid();
         }
 
@@ -214,11 +260,12 @@ namespace SpreadsheetApp11.UI
             if (colIndex >= 0 && colIndex < _service.ColCount)
             {
                 _service.DeleteColumns(colIndex, 1);
+                SetModified(true);
                 BuildGrid();
             }
         }
 
-        private void SaveFile()
+        private bool SaveFile()
         {
             using (var dialog = new SaveFileDialog())
             {
@@ -231,20 +278,26 @@ namespace SpreadsheetApp11.UI
                     try
                     {
                         _service.SaveLocal(dialog.FileName);
+                        SetModified(false);
                         MessageBox.Show($"Файл успішно збережено!\n{dialog.FileName}",
                             "Успіх", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                        return true;
                     }
                     catch (Exception ex)
                     {
                         MessageBox.Show($"Помилка збереження: {ex.Message}",
                             "Помилка", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                        return false;
                     }
                 }
             }
+            return false;
         }
 
         private void LoadFile()
         {
+            if (!PromptSaveIfModified()) return;
+
             using (var dialog = new OpenFileDialog())
             {
                 dialog.Filter = "JSON файли (*.json)|*.json|Всі файли (*.*)|*.*";
@@ -257,6 +310,7 @@ namespace SpreadsheetApp11.UI
                     {
                         _service.LoadLocal(dialog.FileName);
                         BuildGrid();
+                        SetModified(false);
                         MessageBox.Show($"Файл успішно завантажено!\n{dialog.FileName}",
                             "Успіх", MessageBoxButtons.OK, MessageBoxIcon.Information);
                     }
@@ -285,6 +339,8 @@ namespace SpreadsheetApp11.UI
 
                     await Task.Run(() => _service.SaveToDrive(fileName));
 
+                    SetModified(false);
+
                     MessageBox.Show($"Файл '{fileName}' успішно збережено в Google Drive!",
                         "Успіх", MessageBoxButtons.OK, MessageBoxIcon.Information);
                 }
@@ -303,6 +359,8 @@ namespace SpreadsheetApp11.UI
 
         private async void LoadFromDrive()
         {
+            if (!PromptSaveIfModified()) return;
+
             string fileName = Microsoft.VisualBasic.Interaction.InputBox(
                 "Введіть назву файлу або ID з Google Drive:",
                 "Відкрити з Google Drive",
@@ -318,6 +376,7 @@ namespace SpreadsheetApp11.UI
                     await Task.Run(() => _service.LoadFromDrive(fileName));
 
                     BuildGrid();
+                    SetModified(false);
                     MessageBox.Show($"Файл '{fileName}' успішно завантажено з Google Drive!",
                         "Успіх", MessageBoxButtons.OK, MessageBoxIcon.Information);
                 }
